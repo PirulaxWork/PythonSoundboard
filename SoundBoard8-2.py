@@ -1,29 +1,20 @@
+import imp
 import sys
+from typing import Tuple
+from xml.sax import make_parser
 import pygame
 import pprint
 from pygame.locals import *
-from pygame import mixer
 from dataclasses import dataclass
+
+from SubSampleRecorder import Recorder
+from .models import SoundButton
 
 # Init pygame
 pygame.init()
 pygame.display.set_caption('Soundboard')
 screen = pygame.display.set_mode((500, 500))
 clock = pygame.time.Clock()
-
-# IsPlaying toggles sound if looping is true and hold is false
-# if Hold is True, button only plays when held down
-# -1 for infinite looping any other int for that number of loops plus one
-@dataclass
-class SoundButton:
-    Sound : ...
-    State : bool = False     # If the sound is being played
-    IsMuteable : bool = True 
-    NumLoops : int = -1
-    Toggle : bool = False
-
-    def __init__(self, soundPath):
-        self.Sound = mixer.Sound(soundPath)
 
 # Sound Buttons - Main array index is the joystick instance_id, inner array is the button id
 sound_buttons = [
@@ -81,6 +72,7 @@ in_toggle_mode = False
 # If the mixer is paused right now
 is_mixer_paused = False
 
+
 pygame.joystick.init()
 joysticks = [pygame.joystick.Joystick(i) for i in range(pygame.joystick.get_count())]
 for joystick in joysticks:
@@ -92,6 +84,9 @@ pprint.pprint(joysticks)
 pygame.font.init()
 font = pygame.font.SysFont('Comic Sans MS', 30) 
 
+sound_recorder = None
+recorded_sound = None
+
 # event - The pygame event
 # button_state - True if "down", False if "up"
 def process_button_event(event, button_state):
@@ -99,7 +94,7 @@ def process_button_event(event, button_state):
     global is_mixer_paused
 
     if event.button == 9 and event.instance_id == 2: # Pause/unpause mixer
-        is_mixer_paused = not is_mixer_paused
+        is_mixer_paused = not is_mixer_paused # TODO
         if is_mixer_paused:
             pygame.mixer.pause()
         else:
@@ -113,7 +108,18 @@ def process_button_event(event, button_state):
 
     elif event.button == 9 and event.instance_id == 0: # Toggle toggle_mode state
         in_toggle_mode = button_state
+    elif event.button == 9 and event.instance_id == 1: # Start recorder
+        if button_state:
+            # Create recorder instance
+            sound_recorder = Recorder()
 
+            # Add all currently playing sounds to the recording
+            for row in sound_buttons:
+                for button in row:
+                    if button.Sound.active:
+                        sound_recorder.add_sound(button.Sound)
+        else:
+            sound_recorder.
     else:
         try:
             button = sound_buttons[event.instance_id][event.button]
@@ -121,14 +127,25 @@ def process_button_event(event, button_state):
                 if button_state: # Ignore button up
                     button.State = not button.State # Flip state
                     if button.State: 
-                        button.Sound.play(button.NumLoops)
+                        button.Sound.play()
+                        if sound_recorder:
+                            sound_recorder.add_sound(button.Sound)
                     else: 
                         button.Sound.stop()
+                        if sound_recorder:
+                            sound_recorder.remove_sound(button.Sound)
             else:
-                button.State = button_state
-                button.Sound.stop()
-                if button.State:
-                    button.Sound.play(button.NumLoops)
+                if button.State != button_state:
+                    if button_state:
+                        button.Sound.stop()
+                        button.Sound.play()
+                        if sound_recorder:
+                            sound_recorder.add_sound(button.Sound)
+                    else:
+                        button.Sound.stop()
+                        if sound_recorder:
+                            sound_recorder.remove_sound(button.Sound)
+
         except IndexError:
             print(f"Button {event.button} [instance_id: {event.instance_id}] not yet implemented!")
 
@@ -153,4 +170,6 @@ while True:
 
     # Update pygame
     pygame.display.update()
+    if sound_recorder:
+        sound_recorder.update()
     clock.tick(60)
